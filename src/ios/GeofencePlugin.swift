@@ -13,7 +13,9 @@ let iOS8 = floor(NSFoundationVersionNumber) > floor(NSFoundationVersionNumber_iO
 let iOS7 = floor(NSFoundationVersionNumber) <= floor(NSFoundationVersionNumber_iOS_7_1)
 
 func log(message: String){
-    NSLog("%@ - %@", TAG, message)
+    #if DEBUG
+        NSLog("%@ - %@", TAG, message)
+    #endif
 }
 
 var GeofencePluginWebView: UIWebView?
@@ -240,6 +242,35 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate {
 
     func locationManager(manager: CLLocationManager!, didEnterRegion region: CLRegion!) {
         log("Entering region \(region.identifier)")
+        // send id to keystone service here
+        let isLoggedIn = NSUserDefaults.standardUserDefaults().boolForKey("isLoggedIn")
+        let serviceUrl = NSUserDefaults.standardUserDefaults().stringForKey("serviceUrl")
+        log("isLoggedIn:\(isLoggedIn)")
+        log("serviceUrl:\(serviceUrl)")
+        if isLoggedIn {
+            if let userId = NSUserDefaults.standardUserDefaults().stringForKey("userId") {
+                let lat = (region as CLCircularRegion).center.latitude
+                let lng = (region as CLCircularRegion).center.longitude
+                let radius = (region as CLCircularRegion).radius
+                
+                let strLat = NSNumber(double: lat).stringValue
+                let strLng = NSNumber(double: lng).stringValue
+                let strRadius = NSNumber(double: radius).stringValue
+                
+                log("strLat:\(strLat)")
+                log("strLng:\(strLng)")
+                log("strRadius:\(strRadius)")
+
+                var params = ["userId": userId, "storeId": region.identifier, "latitude":strLat, "longitude": strLng, "radius":strRadius] as Dictionary<String, String>
+                if(serviceUrl != nil) {
+                    post(params, url: serviceUrl!)
+                } else {
+                    log("serviceUrl not found in preference not updation checkin")
+                }
+            } else {
+                log("userId not found in preference not updation checkin")
+            }
+        }
         handleTransition(region)
     }
 
@@ -280,6 +311,49 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate {
         notification.soundName = UILocalNotificationDefaultSoundName
         notification.alertBody = geo["notification"]["text"].asString!
         UIApplication.sharedApplication().scheduleLocalNotification(notification)
+    }
+    
+    // added custom
+    
+    func post(params : Dictionary<String, String>, url : String) {
+        var request = NSMutableURLRequest(URL: NSURL(string: url)!)
+        var session = NSURLSession.sharedSession()
+        request.HTTPMethod = "POST"
+        
+        var err: NSError?
+        request.HTTPBody = NSJSONSerialization.dataWithJSONObject(params, options: nil, error: &err)
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("application/json", forHTTPHeaderField: "Accept")
+        
+        var task = session.dataTaskWithRequest(request, completionHandler: {data, response, error -> Void in
+            //println("Response: \(response)")
+            var strData = NSString(data: data, encoding: NSUTF8StringEncoding)
+            //println("Body: \(strData)")
+            var err: NSError?
+            var json = NSJSONSerialization.JSONObjectWithData(data, options: .MutableLeaves, error: &err) as? NSDictionary
+            
+            // Did the JSONObjectWithData constructor return an error? If so, log the error to the console
+            if(err != nil) {
+                println(err!.localizedDescription)
+                let jsonStr = NSString(data: data, encoding: NSUTF8StringEncoding)
+                println("Error could not parse JSON: '\(jsonStr)'")
+            }
+            else {
+                // The JSONObjectWithData constructor didn't return an error. But, we should still
+                // check and make sure that json has a value using optional binding.
+                if let parseJSON = json {
+                    // Okay, the parsedJSON is here, let's get the value for 'success' out of it
+                    var success = parseJSON["status"] as? Bool
+                    log("Status: \(success)")
+                }
+                else {
+                    // Woa, okay the json object was nil, something went worng. Maybe the server isn't running?
+                    let jsonStr = NSString(data: data, encoding: NSUTF8StringEncoding)
+                    println("Error could not parse JSON: \(jsonStr)")
+                }
+            }
+        })
+        task.resume()
     }
 }
 
