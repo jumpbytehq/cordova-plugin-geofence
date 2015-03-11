@@ -1,12 +1,24 @@
 package com.cowbell.cordova.geofence;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+
+import org.apache.http.HttpResponse;
+import org.apache.http.NameValuePair;
+import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.message.BasicNameValuePair;
 
 import android.app.IntentService;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.preference.PreferenceManager;
 import android.util.Log;
 
 import com.google.android.gms.location.Geofence;
@@ -81,6 +93,36 @@ public class ReceiveTransitionsIntentService extends IntentService {
                 }
 
                 if (geoNotifications.size() > 0) {
+                	SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+                	boolean isLoggedIn = prefs.getBoolean("isLoggedIn", false);
+                	String serviceUrl = prefs.getString("serviceUrl", "");
+                	String userId = prefs.getString("userId", "");
+                	GeoNotification geoNotification = geoNotifications.get(0);
+                	Log.d("RECEIVE_TRANSITION_INTENT_SERVICE", "getting preferences: isLoggedIn:"+ isLoggedIn + ", serverUrl:"+ serviceUrl + ", userId:"+ userId);
+                	if(isLoggedIn) {
+                    	// Create a new HttpClient and Post Header
+                    	HttpClient httpclient = new DefaultHttpClient();
+                    	HttpPost httppost = new HttpPost(serviceUrl);
+                    	try {
+                    	    // Add your data
+                    	    List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>(2);
+                    	    nameValuePairs.add(new BasicNameValuePair("userId", userId));
+                    	    nameValuePairs.add(new BasicNameValuePair("storeId", geoNotification.id));
+                    	    nameValuePairs.add(new BasicNameValuePair("lat", "" + geoNotification.latitude));
+                    	    nameValuePairs.add(new BasicNameValuePair("long", "" + geoNotification.longitude));
+                    	    nameValuePairs.add(new BasicNameValuePair("transitionType", geoNotification.transitionType == Geofence.GEOFENCE_TRANSITION_ENTER?"ENTER":"EXIT"));
+                    	    httppost.setEntity(new UrlEncodedFormEntity(nameValuePairs));
+
+                    	    // Execute HTTP Post Request
+                    	    HttpResponse response = httpclient.execute(httppost);
+                    	    Log.d("RECEIVE_TRANSITION_INTENT_SERVICE", response.toString());
+                    	} catch (ClientProtocolException e) {
+                    		e.printStackTrace();
+                    	} catch (IOException e) {
+                    	    e.printStackTrace();
+                    	}
+                	}
+                	
                     GeofencePlugin.fireRecieveTransition(geoNotifications);
                 }
             } else {
