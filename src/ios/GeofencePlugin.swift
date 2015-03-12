@@ -153,6 +153,13 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate {
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        
+        println("total monitored regions:\(locationManager.monitoredRegions.count)")
+        // added
+        //if(store.getTotalGeoNotifications() >= 20) {
+            locationManager.startMonitoringSignificantLocationChanges()
+        //}
+       
         if (!CLLocationManager.locationServicesEnabled()) {
             log("Location services is not enabled")
         } else {
@@ -165,6 +172,22 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate {
         if (!CLLocationManager.isMonitoringAvailableForClass(CLRegion)) {
             log("Geofencing not available")
         }
+    }
+    
+    
+    func haversine(lat1:Double, lon1:Double, lat2:Double, lon2:Double, radius:Double) -> Double {
+        let lat1rad = lat1 * M_PI/180
+        let lon1rad = lon1 * M_PI/180
+        let lat2rad = lat2 * M_PI/180
+        let lon2rad = lon2 * M_PI/180
+        
+        let dLat = lat2rad - lat1rad
+        let dLon = lon2rad - lon1rad
+        let a = sin(dLat/2) * sin(dLat/2) + sin(dLon/2) * sin(dLon/2) * cos(lat1rad) * cos(lat2rad)
+        let c = 2 * asin(sqrt(a))
+        let R = 6372.8
+        
+        return radius * c
     }
 
     func addOrUpdateGeoNotification(geoNotification: JSON) {
@@ -192,7 +215,13 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate {
         region.notifyOnExit = geoNotification["transitionType"].asInt == 2 ? true: false
         //store
         store.addOrUpdate(geoNotification)
-        locationManager.startMonitoringForRegion(region)
+        if(store.getTotalGeoNotifications() <= 20) {
+            locationManager.startMonitoringForRegion(region)
+        } else {
+            // added for monitoring more than 20
+            locationManager.startMonitoringSignificantLocationChanges()
+            //log("location added to DB but not monitered only 20 can be monitered at a time")
+        }
     }
 
     func getWatchedGeoNotifications() -> [JSON]? {
@@ -227,9 +256,60 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate {
             locationManager.stopMonitoringForRegion(region)
         }
     }
+    
+    func removeAllGeoNotificationsListeners() {
+        for object in locationManager.monitoredRegions {
+            let region = object as CLRegion
+            log("Stoping monitoring region \(region.identifier)")
+            locationManager.stopMonitoringForRegion(region)
+        }
+    }
+    
+    func monitorBest20(distances:[Double:Int]) {
+        // add monitor for first 20 sortedBy distance
+        if let allRegions = store.getAll() {
+            var i = 0
+            for (k,v) in Array(distances).sorted({$0.0 < $1.0}) {
+                if i < 20 {
+                    addOrUpdateGeoNotification(allRegions[v])
+                }
+                i++
+                println("\(k):\(v)")
+            }
+        }
+        log("monitoring best 20")
+        println("total monitored regions:\(locationManager.monitoredRegions.count)")
+    }
+    
+    func getDistancesArray(coordinate: CLLocationCoordinate2D) -> [Double:Int] {
+        var distances = [Double:Int]()
+
+        if let allRegions = store.getAll() {
+            for (index,region) in enumerate(allRegions) {
+                let lat = region["latitude"].asDouble!
+                let lng = region["longitude"].asDouble!
+                let radius = region["radius"].asDouble!
+                let distance = haversine(coordinate.latitude, lon1: coordinate.longitude, lat2: lat, lon2: lng, radius: radius)
+                distances[distance] = index
+                //log("distance:\(distance)")
+            }
+        }
+        return distances
+    }
 
     func locationManager(manager: CLLocationManager!, didUpdateLocations locations: [AnyObject]!) {
-        log("update location")
+        log("update location called")
+        // select best 20 here
+        let monitoredRegions = locationManager.monitoredRegions
+        println("total monitored regions:\(monitoredRegions.count)")
+        // remove all notification first
+        removeAllGeoNotificationsListeners()
+        var locationArray = locations as Array
+        var locationObj = locationArray.last as CLLocation
+        var coord = locationObj.coordinate
+        // calculate distance
+        var distances = getDistancesArray(coord)
+        monitorBest20(distances)
     }
 
     func locationManager(manager: CLLocationManager!, didFailWithError error: NSError!) {
@@ -265,7 +345,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate {
                 if(serviceUrl != nil) {
                     post(params, url: serviceUrl!)
                 } else {
-                    log("serviceUrl not found in preference not updation checkin")
+                    log("serviceUrl not found in preference not updating checkin")
                 }
             } else {
                 log("userId not found in preference not updation checkin")
@@ -312,7 +392,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate {
         notification.alertBody = geo["notification"]["text"].asString!
         UIApplication.sharedApplication().scheduleLocalNotification(notification)
     }
-    
+
     // added custom
     
     func post(params : Dictionary<String, String>, url : String) {
@@ -429,7 +509,7 @@ class GeoNotificationStore {
 
     func getAll() -> [JSON]? {
         let (resultSet, err) = SD.executeQuery("SELECT * FROM GeoNotifications")
-
+        
         if err != nil {
             //there was an error during the query, handle it here
             log("Error while fetching from GeoNotifications table: \(err)")
@@ -443,6 +523,11 @@ class GeoNotificationStore {
             }
             return results
         }
+    }
+    
+    func getTotalGeoNotifications() -> Int {
+        let (resultSet, err) = SD.executeQuery("SELECT * FROM GeoNotifications")
+        return resultSet.count
     }
 
     func remove(id: String) {
