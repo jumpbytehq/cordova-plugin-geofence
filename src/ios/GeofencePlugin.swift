@@ -14,7 +14,7 @@ let iOS7 = floor(NSFoundationVersionNumber) <= floor(NSFoundationVersionNumber_i
 
 func log(message: String){
     #if DEBUG
-        NSLog("%@ - %@", TAG, message)
+       NSLog("%@ - %@", TAG, message)
     #endif
 }
 
@@ -215,9 +215,9 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate {
         region.notifyOnExit = geoNotification["transitionType"].asInt == 2 ? true: false
         //store
         store.addOrUpdate(geoNotification)
-        if(store.getTotalGeoNotifications() <= 20) {
-            locationManager.startMonitoringForRegion(region)
-        } else {
+        locationManager.startMonitoringForRegion(region)
+
+        if(store.getTotalGeoNotifications() >= 20) {
             // added for monitoring more than 20
             locationManager.startMonitoringSignificantLocationChanges()
             //log("location added to DB but not monitered only 20 can be monitered at a time")
@@ -274,7 +274,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate {
                     addOrUpdateGeoNotification(allRegions[v])
                 }
                 i++
-                println("\(k):\(v)")
+               // println("\(k):\(v)")
             }
         }
         log("monitoring best 20")
